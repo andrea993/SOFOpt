@@ -1,0 +1,32 @@
+{
+    "version": 8,
+    "configurePresets": [
+        {
+            "name": "SOFOpt-Linux",
+            "displayName": "GCC",
+            "description": "Using compilers from PATH: gcc, g++",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "SOFOpt-MSVC",
+            "displayName": "MSVC (Visual Studio)",
+            "description": "MSVC build using vcpkg dependencies",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "cl",
+                "CMAKE_CXX_COMPILER": "cl",
+                "CMAKE_BUILD_TYPE": "Release",
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "CMAKE_TOOLCHAIN_FILE": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake"
+            }
+        }
+    ]
+}
