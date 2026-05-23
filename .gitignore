@@ -8,6 +8,7 @@ build/
 *.so
 *.dll
 *.exe
+*.zip
 
 # Ignore CMake generated files
 CMakeFiles/
