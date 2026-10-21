@@ -35,9 +35,10 @@ SOF_Problem MakeDebugProblem()
     problem.X0.resize(4);
     problem.X0 << 1.0, 1.0, 1.0, 1.0;
 
-    problem.Structure.resize(2, 2);
-    problem.Structure << true, false,
-                         false, true;
+    problem.ConstraintGain.resize(2, 2);
+    problem.ConstraintGain << false, true,
+                              true, false;
+    problem.ConstraintGainValues = Eigen::MatrixXd::Zero(2, 2);
 
     problem.use_P_precond = true;
     return problem;

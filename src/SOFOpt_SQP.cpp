@@ -6,18 +6,21 @@ SOF_Result SOFOpt_SQP::Optim_KxOut(const SOF_Problem &problem)
     int Nu = problem.B.cols();
     int Ny = problem.C.rows();
 
-    std::vector<std::pair<int, int>> structureIndices;
-    if ((problem.Structure.rows() > 0 || problem.Structure.cols() > 0))
+    std::map<std::pair<int, int>, double> constraintGainMap;
+    if ((problem.ConstraintGain.rows() > 0 || problem.ConstraintGain.cols() > 0))
     {
-        if (problem.Structure.rows() != Nu || problem.Structure.cols() != Ny)
-            throw std::invalid_argument("The structure matrix must have the same dimensions as the Ky matrix");
+        if (problem.ConstraintGain.rows() != Nu || problem.ConstraintGain.cols() != Ny)
+            throw std::invalid_argument("The ConstraintGain matrix must have the same dimensions as the Ky matrix");
 
-        for (int i = 0; i < problem.Structure.rows(); ++i)
+        if (problem.ConstraintGainValues.rows() != Nu || problem.ConstraintGainValues.cols() != Ny)
+            throw std::invalid_argument("The ConstraintGainValues matrix must have the same dimensions as the Ky matrix");
+
+        for (int i = 0; i < problem.ConstraintGain.rows(); ++i)
         {
-            for (int j = 0; j < problem.Structure.cols(); ++j)
+            for (int j = 0; j < problem.ConstraintGain.cols(); ++j)
             {
-                if (!problem.Structure(i, j))
-                    structureIndices.push_back(std::make_pair(i, j));
+                if (problem.ConstraintGain(i, j))
+                    constraintGainMap[std::make_pair(i, j)] = problem.ConstraintGainValues(i, j);
             }
         }
     }
@@ -51,26 +54,30 @@ SOF_Result SOFOpt_SQP::Optim_KxOut(const SOF_Problem &problem)
     const double s_alpha_max =
         ControlAlgebra::SoftSpectralAbscissaSchurValue(Acl_lqr, problem.beta) * problem.rho_alpha;
         
-
     double LQR_Cost = ControlAlgebra::LQR_CostEval(Kx_P, ss_P, Q_P, R_P, X0_P);
 
     auto OutputNullSpace = ControlAlgebra::Ker(ss_P.C);
     auto OutputUsefulSpace = ss_P.C.transpose() * (ss_P.C * ss_P.C.transpose()).inverse(); // pinv(C), complementary to ker(C)
 
-
     // Create an OptData structure to hold the parameters
-    auto constant_NullGain_Gradient = Constant_NullGain_Gradient(ss, OutputNullSpace);
-    auto constant_Structure_Gradient = Constant_Structure_Gradient(ss, OutputUsefulSpace, structureIndices);
+    auto constant_NullGain_Gradient = Constant_NullGain_Gradient(ss_P, OutputNullSpace);
+    auto constant_ConstraintGain_Gradient = Constant_Constraint_Gradient(ss_P, OutputUsefulSpace, constraintGainMap);
 
     SOFOpt_SQP::OptData optData = {
-        ss_P, Q_P, R_P, X0_P, LQR_Cost, OutputNullSpace, OutputUsefulSpace,
-        structureIndices,
+        ss_P,
+        Q_P,
+        R_P,
+        X0_P,
+        LQR_Cost,
+        OutputNullSpace,
+        OutputUsefulSpace,
+        constraintGainMap,
         constant_NullGain_Gradient,
-        constant_Structure_Gradient,
+        constant_ConstraintGain_Gradient,
         sp_pars,
         s_alpha_max,
         problem.beta
-        };
+    };
 
     // NLOPT_LN_COBYLA NLOPT_LD_SLSQP
     nlopt_opt opt = nlopt_create(NLOPT_LD_SLSQP, Nx * Nu);
@@ -94,31 +101,37 @@ SOF_Result SOFOpt_SQP::Optim_KxOut(const SOF_Problem &problem)
         K_null = Kx * optData_ptr->OutputNullSpace;
     };
     auto nullGain_constraint_TOL = std::vector<double>(Nu * OutputNullSpace.cols(), 1e-6);
-    nlopt_add_equality_mconstraint(opt, Nu * OutputNullSpace.cols(), nullGain_constraint, &optData, nullGain_constraint_TOL.data());
+    if (!nullGain_constraint_TOL.empty())
+        nlopt_add_equality_mconstraint(opt, Nu * OutputNullSpace.cols(), nullGain_constraint, &optData, nullGain_constraint_TOL.data());
 
-    // Strucutre constraints
-    auto structure_constraint = [](unsigned m, double *result, unsigned n, const double *x, double *grad, void *data) -> void
+    // Fixed Ky-entry constraints.
+    auto gain_constraint = [](unsigned m, double *result, unsigned n, const double *x, double *grad, void *data) -> void
     {
-        auto optData_ptr = reinterpret_cast<OptData *>(data);
+        auto optData_ptr = reinterpret_cast<OptData*>(data);
         int Nx = optData_ptr->ss.A.rows();
         int Nu = optData_ptr->ss.B.cols();
 
         if (grad != nullptr)
         {
-            std::copy(optData_ptr->constant_Structure_Gradient.data(),
-                      optData_ptr->constant_Structure_Gradient.data() + optData_ptr->constant_Structure_Gradient.size(),
+            std::copy(optData_ptr->constant_ConstraintGain_Gradient.data(),
+                      optData_ptr->constant_ConstraintGain_Gradient.data() + optData_ptr->constant_ConstraintGain_Gradient.size(),
                       grad);
         }
 
         auto Kx = Eigen::Map<const Eigen::MatrixXd>(x, Nu, Nx);
-        for (int i = 0; i < optData_ptr->structureIndices.size(); ++i)
+        int i = 0;
+
+        for (const auto &constr_item : optData_ptr->constraintGainMap)
         {
-            const auto &s_idx = optData_ptr->structureIndices[i];
-            result[i] = Kx.row(s_idx.first) * optData_ptr->OutputUsefulSpace.col(s_idx.second);
+            const auto &c_idx = constr_item.first;
+            const auto value = constr_item.second;
+            result[i++] =
+                Kx.row(c_idx.first).dot(optData_ptr->OutputUsefulSpace.col(c_idx.second)) - value;
         }
     };
-    auto structure_constraint_TOL = std::vector<double>(structureIndices.size(), 1e-6);
-    nlopt_add_equality_mconstraint(opt, structureIndices.size(), structure_constraint, &optData, structure_constraint_TOL.data());
+    auto gain_constraint_TOL = std::vector<double>(constraintGainMap.size(), 1e-6);
+    if (!gain_constraint_TOL.empty())
+        nlopt_add_equality_mconstraint(opt, constraintGainMap.size(), gain_constraint, &optData, gain_constraint_TOL.data());
 
     // Schur spectral constraints
     auto eigen_constraint = [](unsigned n, const double *x, double *grad, void *data) -> double
@@ -180,7 +193,8 @@ double SOFOpt_SQP::Fitness(unsigned n, const double *x, double *grad, void *data
     if (grad != nullptr)
     {
         auto res = ControlAlgebra::LQR_SoftCostEval<true>(
-            Kx, optData->ss, optData->Q, optData->R, optData->X0, optData->sp_pars);
+            Kx, optData->ss, optData->Q, optData->R, optData->X0,
+            optData->sp_pars, optData->beta);
 
         J = res.first;
         Eigen::Map<Eigen::MatrixXd>(grad, Nu, Nx) = res.second;
@@ -188,13 +202,16 @@ double SOFOpt_SQP::Fitness(unsigned n, const double *x, double *grad, void *data
     else
     {
         J = ControlAlgebra::LQR_SoftCostEval<false>(
-            Kx, optData->ss, optData->Q, optData->R, optData->X0, optData->sp_pars);
+            Kx, optData->ss, optData->Q, optData->R, optData->X0,
+            optData->sp_pars, optData->beta);
     }
 
     return J - optData->LQR_cost;
 }
 
-std::vector<double> SOFOpt_SQP::Constant_NullGain_Gradient(const ControlAlgebra::StateSpace &ss, const Eigen::MatrixXd &OutputNullSpace)
+std::vector<double> SOFOpt_SQP::Constant_NullGain_Gradient(
+    const ControlAlgebra::StateSpace &ss,
+    const Eigen::MatrixXd &OutputNullSpace)
 {
     int Nx = ss.A.rows();
     int Nu = ss.B.cols();
@@ -216,20 +233,25 @@ std::vector<double> SOFOpt_SQP::Constant_NullGain_Gradient(const ControlAlgebra:
     return grad;
 }
 
-std::vector<double> SOFOpt_SQP::Constant_Structure_Gradient(const ControlAlgebra::StateSpace &ss, const Eigen::MatrixXd &OutputUsefulSpace, const std::vector<std::pair<int, int>> &structureIndices)
+std::vector<double> SOFOpt_SQP::Constant_Constraint_Gradient(
+    const ControlAlgebra::StateSpace &ss,
+    const Eigen::MatrixXd &OutputUsefulSpace,
+    const std::map<std::pair<int, int>, double> &constraintMap)
 {
     int Nx = ss.A.rows();
     int Nu = ss.B.cols();
 
-    std::vector<double> grad(Nx * Nu * structureIndices.size());
-    auto JacobMap = Eigen::Map<Eigen::MatrixXd>(grad.data(), Nu * Nx, structureIndices.size());
+    std::vector<double> grad(Nx * Nu * constraintMap.size());
+    auto JacobMap = Eigen::Map<Eigen::MatrixXd>(grad.data(), Nu * Nx, constraintMap.size());
 
-    for (int i = 0; i < structureIndices.size(); ++i)
+    int i = 0;
+    for (const auto &constr_item : constraintMap)
     {
-        const auto &s_idx = structureIndices[i];
+        const auto &c_idx = constr_item.first;
+
         Eigen::MatrixXd gradMap = Eigen::MatrixXd::Zero(Nu, Nx);
-        gradMap.row(s_idx.first) = OutputUsefulSpace.col(s_idx.second);
-        JacobMap.col(i) = Eigen::Map<Eigen::VectorXd>(gradMap.data(), Nu * Nx);
+        gradMap.row(c_idx.first) = OutputUsefulSpace.col(c_idx.second);
+        JacobMap.col(i++) = Eigen::Map<Eigen::VectorXd>(gradMap.data(), Nu * Nx);
     }
 
     return grad;

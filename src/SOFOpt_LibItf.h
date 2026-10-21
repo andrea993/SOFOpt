@@ -26,7 +26,8 @@ DLL_EXPORT OptimOutput_C Optim_KxOut_C(
     const double* Q, int Q_rows, int Q_cols,
     const double* R, int R_rows, int R_cols,
     const double* X0, int X0_size,
-    const bool* Structure, int Structure_rows, int Structure_cols,
+    const bool* ConstraintGain, int ConstraintGain_rows, int ConstraintGain_cols,
+    const double* ConstraintGainValues, int ConstraintGainValues_rows, int ConstraintGainValues_cols,
     bool use_P_precond,
     double rho_alpha,
     double beta, // Softmax spectral absicssa

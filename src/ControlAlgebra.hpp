@@ -106,14 +106,15 @@ public:
         const Eigen::MatrixXd &Q,
         const Eigen::MatrixXd &R,
         const Eigen::VectorXd &X0,
-        const SoftPlus_Pars &sp)
+        const SoftPlus_Pars &sp,
+        const double beta)
     {
         Eigen::MatrixXd Acl_raw = ss.A - ss.B * Kx;
         Eigen::MatrixXd Qlyap = Q + Kx.transpose() * R * Kx;
 
         if constexpr (!evalGradient)
         {
-            auto alpha = SoftSpectralAbscissa<false>(Acl_raw);
+            auto alpha = SoftSpectralAbscissa<false>(Acl_raw, beta);
             auto gamma = SoftPlus_eta<false>(alpha, sp);
 
             Eigen::MatrixXd Acl =
@@ -126,7 +127,7 @@ public:
         }
         else
         {
-            auto [alpha, G_alpha] = SoftSpectralAbscissa<true>(Acl_raw);
+            auto [alpha, G_alpha] = SoftSpectralAbscissa<true>(Acl_raw, beta);
             auto [gamma, dgamma_dalpha] = SoftPlus_eta<true>(alpha, sp);
 
             Eigen::MatrixXd Acl =
@@ -167,7 +168,7 @@ public:
     }
 
     template <bool evalGradient = false>
-    static auto SoftSpectralAbscissa(const Eigen::MatrixXd &A, double beta = 50.0)
+    static auto SoftSpectralAbscissa(const Eigen::MatrixXd &A, const double beta)
     {
         if constexpr (evalGradient)
         {

@@ -116,8 +116,8 @@ SOF_Problem ReadProblem(std::istream& input)
     const auto r_rows = ReadScalar<std::int32_t>(input);
     const auto r_cols = ReadScalar<std::int32_t>(input);
     const auto x0_size = ReadScalar<std::int32_t>(input);
-    const auto structure_rows = ReadScalar<std::int32_t>(input);
-    const auto structure_cols = ReadScalar<std::int32_t>(input);
+    const auto constraint_gain_rows = ReadScalar<std::int32_t>(input);
+    const auto constraint_gain_cols = ReadScalar<std::int32_t>(input);
     const auto use_p_precond = ReadScalar<std::uint8_t>(input);
     const auto rho_alpha = ReadScalar<double>(input);
     const auto beta = ReadScalar<double>(input);
@@ -131,7 +131,8 @@ SOF_Problem ReadProblem(std::istream& input)
     problem.Q = ReadDoubleMatrix(input, q_rows, q_cols);
     problem.R = ReadDoubleMatrix(input, r_rows, r_cols);
     problem.X0 = ReadDoubleVector(input, x0_size);
-    problem.Structure = ReadLogicalMatrix(input, structure_rows, structure_cols);
+    problem.ConstraintGain = ReadLogicalMatrix(input, constraint_gain_rows, constraint_gain_cols);
+    problem.ConstraintGainValues = ReadDoubleMatrix(input, constraint_gain_rows, constraint_gain_cols);
     problem.use_P_precond = use_p_precond != 0;
     problem.rho_alpha = rho_alpha;
     problem.beta = beta;

@@ -56,8 +56,9 @@ SOF_Problem MakeRoomTemperatureProblem()
     problem.Q = Eigen::MatrixXd::Identity(n_states, n_states);
     problem.R = Eigen::MatrixXd::Identity(n_inputs, n_inputs);
     problem.X0 = Eigen::VectorXd::Ones(n_states);
-    problem.Structure =
-        Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>::Constant(n_inputs, n_outputs, true);
+    problem.ConstraintGain =
+        Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>::Constant(n_inputs, n_outputs, false);
+    problem.ConstraintGainValues = Eigen::MatrixXd::Zero(n_inputs, n_outputs);
     problem.use_P_precond = true;
     problem.rho_alpha = 0.5;
     return problem;

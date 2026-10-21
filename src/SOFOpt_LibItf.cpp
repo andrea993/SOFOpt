@@ -17,7 +17,8 @@ OptimOutput_C Optim_KxOut_C(
     const double* Q, int Q_rows, int Q_cols,
     const double* R, int R_rows, int R_cols,
     const double* X0, int X0_size,
-    const bool* Structure, int Structure_rows, int Structure_cols,
+    const bool* ConstraintGain, int ConstraintGain_rows, int ConstraintGain_cols,
+    const double* ConstraintGainValues, int ConstraintGainValues_rows, int ConstraintGainValues_cols,
     bool use_P_precond,
     double rho_alpha, double beta, double r, double c
 )
@@ -36,22 +37,28 @@ OptimOutput_C Optim_KxOut_C(
 #endif
 
         // Input validation
-    if (!A || !B || !C || !Q || !R || !X0 || !Structure) {
+    if (!A || !B || !C || !Q || !R || !X0 || !ConstraintGain || !ConstraintGainValues) {
         throw std::invalid_argument("Null pointer passed as argument");
     }
 
     if (A_rows <= 0 || A_cols <= 0 || B_rows <= 0 || B_cols <= 0 ||
         C_rows <= 0 || C_cols <= 0 || Q_rows <= 0 || Q_cols <= 0 ||
         R_rows <= 0 || R_cols <= 0 || X0_size <= 0 ||
-        Structure_rows <= 0 || Structure_cols <= 0) {
+        ConstraintGain_rows <= 0 || ConstraintGain_cols <= 0 ||
+        ConstraintGainValues_rows <= 0 || ConstraintGainValues_cols <= 0) {
         throw std::invalid_argument("Invalid matrix dimensions");
     }
 
     // Dimension consistency checks
     if (A_rows != A_cols || A_rows != B_rows || 
+        C_cols != A_cols ||
         A_cols != Q_rows || Q_rows != Q_cols ||
         B_cols != R_cols || R_rows != R_cols ||
-        X0_size != A_rows) {
+        X0_size != A_rows ||
+        ConstraintGain_rows != B_cols ||
+        ConstraintGain_cols != C_rows ||
+        ConstraintGainValues_rows != B_cols ||
+        ConstraintGainValues_cols != C_rows) {
         throw std::invalid_argument("Inconsistent matrix dimensions");
     }
 
@@ -76,7 +83,8 @@ OptimOutput_C Optim_KxOut_C(
     std::cout << "Q_rows: " << Q_rows << ", Q_cols: " << Q_cols << std::endl;
     std::cout << "R_rows: " << R_rows << ", R_cols: " << R_cols << std::endl;
     std::cout << "X0_size: " << X0_size << std::endl;
-    std::cout << "Structure_rows: " << Structure_rows << ", Structure_cols: " << Structure_cols << std::endl;
+    std::cout << "ConstraintGain_rows: " << ConstraintGain_rows << ", ConstraintGain_cols: " << ConstraintGain_cols << std::endl;
+    std::cout << "ConstraintGainValues_rows: " << ConstraintGainValues_rows << ", ConstraintGainValues_cols: " << ConstraintGainValues_cols << std::endl;
 #endif
 
 
@@ -86,7 +94,8 @@ OptimOutput_C Optim_KxOut_C(
     Eigen::Map<const Eigen::MatrixXd> Q_map(Q, Q_rows, Q_cols);
     Eigen::Map<const Eigen::MatrixXd> R_map(R, R_rows, R_cols);
     Eigen::Map<const Eigen::VectorXd> X0_map(X0, X0_size);
-    Eigen::Map<const Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>> Structure_map(Structure, Structure_rows, Structure_cols);
+    Eigen::Map<const Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>> ConstraintGain_map(ConstraintGain, ConstraintGain_rows, ConstraintGain_cols);
+    Eigen::Map<const Eigen::MatrixXd> ConstraintGainValues_map(ConstraintGainValues, ConstraintGainValues_rows, ConstraintGainValues_cols);
 
 #ifdef DEBUG
     std::cout << "A: \n" << A_map << std::endl;
@@ -95,12 +104,24 @@ OptimOutput_C Optim_KxOut_C(
     std::cout << "Q: \n" << Q_map << std::endl;
     std::cout << "R: \n" << R_map << std::endl;
     std::cout << "X0: \n" << X0_map << std::endl;
-    std::cout << "Structure: \n" << Structure_map << std::endl;
+    std::cout << "ConstraintGain: \n" << ConstraintGain_map << std::endl;
+    std::cout << "ConstraintGainValues: \n" << ConstraintGainValues_map << std::endl;
 #endif
 
-    auto problem = SOF_Problem {
-        A_map, B_map, C_map, Q_map, R_map, X0_map, Structure_map, use_P_precond, rho_alpha, beta, r, c
-    };
+    SOF_Problem problem;
+    problem.A = A_map;
+    problem.B = B_map;
+    problem.C = C_map;
+    problem.Q = Q_map;
+    problem.R = R_map;
+    problem.X0 = X0_map;
+    problem.ConstraintGain = ConstraintGain_map;
+    problem.ConstraintGainValues = ConstraintGainValues_map;
+    problem.use_P_precond = use_P_precond;
+    problem.rho_alpha = rho_alpha;
+    problem.beta = beta;
+    problem.r = r;
+    problem.c = c;
 
     auto sol = SOFOpt_SQP::Optim_KxOut(problem);
        

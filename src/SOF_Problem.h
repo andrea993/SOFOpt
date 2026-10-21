@@ -16,7 +16,8 @@ struct SOF_Problem
     Eigen::MatrixXd Q;
     Eigen::MatrixXd R;
     Eigen::VectorXd X0;
-    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> Structure;
+    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> ConstraintGain;
+    Eigen::MatrixXd ConstraintGainValues;
     bool use_P_precond = true;
     double rho_alpha = 1e-6;
     double beta = 100.0; // Softmax spectral absicssa

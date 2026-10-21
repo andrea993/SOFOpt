@@ -13,8 +13,8 @@ u     = -Ky y
 
 the library computes an output-feedback gain `Ky` and the equivalent full-state
 gain `Kx = Ky * C`. The optimizer starts from the continuous-time LQR solution,
-projects it onto the feasible output-feedback space, enforces optional sparsity
-constraints on `Ky`, and minimizes an LQR-style quadratic cost while preserving
+projects it onto the feasible output-feedback space, enforces optional fixed
+entry constraints on `Ky`, and minimizes an LQR-style quadratic cost while preserving
 closed-loop stability through a soft spectral-abscissa constraint.
 
 The primary public entry point is:
@@ -26,7 +26,7 @@ SOF_Result SolveOutputFeedback(const SOF_Problem& problem);
 ## Features
 
 - Static output-feedback synthesis for continuous-time LTI systems.
-- Optional binary sparsity pattern for the output-feedback gain `Ky`.
+- Optional fixed-value constraints for selected entries of `Ky`.
 - LQR-based initialization.
 - SQP optimization through NLopt's `NLOPT_LD_SLSQP` backend.
 - Eigen-based dense matrix API.
@@ -177,9 +177,10 @@ int main()
     problem.X0.resize(4);
     problem.X0 << 1.0, 1.0, 1.0, 1.0;
 
-    problem.Structure.resize(2, 2);
-    problem.Structure << true, false,
-                         false, true;
+    problem.ConstraintGain.resize(2, 2);
+    problem.ConstraintGain << false, true,
+                              true, false;
+    problem.ConstraintGainValues = Eigen::MatrixXd::Zero(2, 2);
 
     problem.use_P_precond = true;
     problem.rho_alpha = 1e-6;
@@ -213,7 +214,8 @@ struct SOF_Problem
     Eigen::MatrixXd Q;
     Eigen::MatrixXd R;
     Eigen::VectorXd X0;
-    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> Structure;
+    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> ConstraintGain;
+    Eigen::MatrixXd ConstraintGainValues;
     bool use_P_precond = true;
     double rho_alpha = 1e-6;
     double beta = 100.0;
@@ -240,25 +242,32 @@ Then the matrices must satisfy:
 | `Q` | `Nx x Nx` | State cost matrix. |
 | `R` | `Nu x Nu` | Input cost matrix. |
 | `X0` | `Nx` | Initial condition used in the cost evaluation. |
-| `Structure` | `Nu x Ny` | Boolean sparsity mask for `Ky`. |
+| `ConstraintGain` | `Nu x Ny` | Boolean mask for fixed entries of `Ky`. |
+| `ConstraintGainValues` | `Nu x Ny` | Target values for fixed entries of `Ky`. |
 
 All fields are required. Empty matrices are rejected.
 
-### Structure Mask
+### Fixed Gain Constraints
 
-`Structure(i, j)` controls whether `Ky(i, j)` may be nonzero:
+`ConstraintGain(i, j)` controls whether `Ky(i, j)` is fixed:
 
-- `true`: this gain entry is free.
-- `false`: this gain entry is constrained to zero.
+- `true`: `Ky(i, j)` is constrained to `ConstraintGainValues(i, j)`.
+- `false`: this gain entry is free.
 
-For an unconstrained dense `Ky`, use a `Nu x Ny` matrix filled with `true`.
+For an unconstrained dense `Ky`, use a `Nu x Ny` `ConstraintGain` matrix filled
+with `false`; `ConstraintGainValues` still must have size `Nu x Ny`.
 
 Example:
 
 ```cpp
-problem.Structure =
-    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>::Constant(Nu, Ny, true);
+problem.ConstraintGain =
+    Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>::Constant(Nu, Ny, false);
+problem.ConstraintGainValues = Eigen::MatrixXd::Zero(Nu, Ny);
 ```
+
+The previous sparsity-mask behavior is represented by setting
+`ConstraintGain(i, j) = true` and `ConstraintGainValues(i, j) = 0.0` for entries
+that must remain zero.
 
 ### Tuning Parameters
 
@@ -304,8 +313,8 @@ Eigen::MatrixXd Acl = problem.A - problem.B * result.Ky * problem.C;
 ```
 
 `result.Kx` is the optimized gain represented in state coordinates. In normal
-use it satisfies the output-feedback constraints imposed by `C` and
-`Structure`.
+use it satisfies the output-feedback constraints imposed by `C`,
+`ConstraintGain`, and `ConstraintGainValues`.
 
 ## Validation and Exceptions
 
@@ -313,8 +322,10 @@ use it satisfies the output-feedback constraints imposed by `C` and
 
 - non-empty matrices and vector,
 - dimension consistency,
-- `Structure.rows() == B.cols()`,
-- `Structure.cols() == C.rows()`,
+- `ConstraintGain.rows() == B.cols()`,
+- `ConstraintGain.cols() == C.rows()`,
+- `ConstraintGainValues.rows() == B.cols()`,
+- `ConstraintGainValues.cols() == C.rows()`,
 - finite scalar tuning parameters,
 - non-negative `rho_alpha` and `r`,
 - positive `beta` and `c`.
@@ -362,7 +373,8 @@ OptimOutput_C Optim_KxOut_C(
     const double* Q, int Q_rows, int Q_cols,
     const double* R, int R_rows, int R_cols,
     const double* X0, int X0_size,
-    const bool* Structure, int Structure_rows, int Structure_cols,
+    const bool* ConstraintGain, int ConstraintGain_rows, int ConstraintGain_cols,
+    const double* ConstraintGainValues, int ConstraintGainValues_rows, int ConstraintGainValues_cols,
     bool use_P_precond,
     double rho_alpha,
     double beta,
@@ -427,8 +439,8 @@ int32   Q_cols
 int32   R_rows
 int32   R_cols
 int32   X0_size
-int32   Structure_rows
-int32   Structure_cols
+int32   ConstraintGain_rows
+int32   ConstraintGain_cols
 uint8   use_P_precond
 double  rho_alpha
 double  beta
@@ -440,10 +452,11 @@ double  C[C_rows * C_cols]
 double  Q[Q_rows * Q_cols]
 double  R[R_rows * R_cols]
 double  X0[X0_size]
-uint8   Structure[Structure_rows * Structure_cols]
+uint8   ConstraintGain[ConstraintGain_rows * ConstraintGain_cols]
+double  ConstraintGainValues[ConstraintGain_rows * ConstraintGain_cols]
 ```
 
-`Structure` entries are interpreted as false when zero and true otherwise.
+`ConstraintGain` entries are interpreted as false when zero and true otherwise.
 
 ### Response Layout
 
@@ -512,7 +525,7 @@ For best results:
 - use symmetric positive definite `R`,
 - scale states, inputs, and outputs to comparable numerical ranges,
 - keep `use_P_precond` enabled unless diagnosing conditioning behavior,
-- start with a dense `Structure` mask before adding sparsity constraints.
+- start with an all-false `ConstraintGain` mask before adding fixed-entry constraints.
 
 ## Limitations
 

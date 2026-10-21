@@ -13,7 +13,8 @@ SOF_Result SolveOutputFeedback(const SOF_Problem& problem)
         problem.Q.rows() <= 0 || problem.Q.cols() <= 0 ||
         problem.R.rows() <= 0 || problem.R.cols() <= 0 ||
         problem.X0.size() <= 0 ||
-        problem.Structure.rows() <= 0 || problem.Structure.cols() <= 0) {
+        problem.ConstraintGain.rows() <= 0 || problem.ConstraintGain.cols() <= 0 ||
+        problem.ConstraintGainValues.rows() <= 0 || problem.ConstraintGainValues.cols() <= 0) {
         throw std::invalid_argument("Invalid matrix dimensions");
     }
 
@@ -25,9 +26,15 @@ SOF_Result SolveOutputFeedback(const SOF_Problem& problem)
         problem.R.rows() != problem.B.cols() ||
         problem.R.cols() != problem.B.cols() ||
         problem.X0.size() != problem.A.rows() ||
-        problem.Structure.rows() != problem.B.cols() ||
-        problem.Structure.cols() != problem.C.rows()) {
+        problem.ConstraintGain.rows() != problem.B.cols() ||
+        problem.ConstraintGain.cols() != problem.C.rows() ||
+        problem.ConstraintGainValues.rows() != problem.B.cols() ||
+        problem.ConstraintGainValues.cols() != problem.C.rows()) {
         throw std::invalid_argument("Inconsistent matrix dimensions");
+    }
+
+    if (!problem.ConstraintGainValues.allFinite()) {
+        throw std::invalid_argument("ConstraintGainValues must contain only finite values");
     }
 
     if (!std::isfinite(problem.rho_alpha) || problem.rho_alpha < 0.0) {
