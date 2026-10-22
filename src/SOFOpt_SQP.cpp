@@ -27,14 +27,18 @@ SOF_Result SOFOpt_SQP::Optim_KxOut(const SOF_Problem &problem)
 
     auto ss = ControlAlgebra::StateSpace{problem.A, problem.B, problem.C, Eigen::MatrixXd::Zero(problem.C.rows(), problem.B.cols())};
 
-    auto LQR_sol = ControlAlgebra::K_LQRc(ss, problem.Q, problem.R);
-    auto Kx = LQR_sol.first;
-    auto P = LQR_sol.second;
+    auto lqr_sol = ControlAlgebra::K_LQRc(ss, problem.Q, problem.R);
+    Eigen::MatrixXd Kx_lqr = std::move(lqr_sol.first);
+    Eigen::MatrixXd P = std::move(lqr_sol.second);
+    Eigen::MatrixXd Kx = problem.Kx0.size() == 0 ? Kx_lqr : problem.Kx0;
 
     Eigen::MatrixXd Psqrt;
-    if (problem.use_P_precond) // Change of coordinates (coordinates "P") to improve conditioning using the solution of the ARE as a preconditioner
+    if (problem.use_P_precond) // Change coordinates using the Riccati solution as a preconditioner.
     {
-        Eigen::MatrixXd L = P.llt().matrixL();    
+        Eigen::LLT<Eigen::MatrixXd> llt(P);
+        if (llt.info() != Eigen::Success)
+            throw std::runtime_error("The LQR Riccati solution is not positive definite");
+        Eigen::MatrixXd L = llt.matrixL();
         Psqrt = L.transpose().triangularView<Eigen::Upper>().solve(Eigen::MatrixXd::Identity(Nx, Nx));// preconditioning matrix
     }
     else
@@ -44,17 +48,18 @@ SOF_Result SOFOpt_SQP::Optim_KxOut(const SOF_Problem &problem)
 
     ControlAlgebra::StateSpace ss_P = ControlAlgebra::StateTransform(ss, Psqrt.inverse());
     Eigen::MatrixXd Kx_P = Kx * Psqrt;
+    Eigen::MatrixXd Kx_lqr_P = Kx_lqr * Psqrt;
     Eigen::MatrixXd Q_P = Psqrt.transpose() * problem.Q * Psqrt;
     Eigen::MatrixXd R_P = problem.R;
     Eigen::VectorXd X0_P = Psqrt.inverse() * problem.X0;
 
-    auto Acl_lqr = ss_P.A - ss_P.B*Kx_P;
+    auto Acl_lqr = ss_P.A - ss_P.B*Kx_lqr_P;
     auto sp_pars = ControlAlgebra::SoftPlusParsFromPoles(Acl_lqr, problem.r, problem.c);
 
     const double s_alpha_max =
         ControlAlgebra::SoftSpectralAbscissaSchurValue(Acl_lqr, problem.beta) * problem.rho_alpha;
         
-    double LQR_Cost = ControlAlgebra::LQR_CostEval(Kx_P, ss_P, Q_P, R_P, X0_P);
+    double reference_cost = ControlAlgebra::LQR_CostEval(Kx_lqr_P, ss_P, Q_P, R_P, X0_P);
 
     auto OutputNullSpace = ControlAlgebra::Ker(ss_P.C);
     auto OutputUsefulSpace = ss_P.C.transpose() * (ss_P.C * ss_P.C.transpose()).inverse(); // pinv(C), complementary to ker(C)
@@ -68,7 +73,7 @@ SOF_Result SOFOpt_SQP::Optim_KxOut(const SOF_Problem &problem)
         Q_P,
         R_P,
         X0_P,
-        LQR_Cost,
+        reference_cost,
         OutputNullSpace,
         OutputUsefulSpace,
         constraintGainMap,
@@ -177,7 +182,7 @@ SOF_Result SOFOpt_SQP::Optim_KxOut(const SOF_Problem &problem)
 
     //auto Kx_optim = Eigen::Map<MatrixXd>(x, Nu, Nx);
     auto Ky_optim = Kx_P * OutputUsefulSpace;
-    return SOF_Result{Kx, Ky_optim, LQR_Cost, ControlAlgebra::LQR_CostEval(Kx, ss, problem.Q, problem.R, problem.X0), std::string(nlopt_result_to_string(result))};
+    return SOF_Result{Kx, Ky_optim, reference_cost, ControlAlgebra::LQR_CostEval(Kx, ss, problem.Q, problem.R, problem.X0), std::string(nlopt_result_to_string(result))};
 }
 
 double SOFOpt_SQP::Fitness(unsigned n, const double *x, double *grad, void *data)
@@ -206,7 +211,10 @@ double SOFOpt_SQP::Fitness(unsigned n, const double *x, double *grad, void *data
             optData->sp_pars, optData->beta);
     }
 
-    return J - optData->LQR_cost;
+    // Centering by the constant full-state LQR cost does not change the
+    // mathematical minimizer or gradient, but improves the numerical scale
+    // seen by SLSQP and its stopping/line-search tests.
+    return J - optData->reference_cost;
 }
 
 std::vector<double> SOFOpt_SQP::Constant_NullGain_Gradient(

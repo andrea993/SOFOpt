@@ -37,6 +37,16 @@ SOF_Result SolveOutputFeedback(const SOF_Problem& problem)
         throw std::invalid_argument("ConstraintGainValues must contain only finite values");
     }
 
+    if (problem.Kx0.size() != 0) {
+        if (problem.Kx0.rows() != problem.B.cols() ||
+            problem.Kx0.cols() != problem.A.rows()) {
+            throw std::invalid_argument("Kx0 must be empty or have dimensions Nu x Nx");
+        }
+        if (!problem.Kx0.allFinite()) {
+            throw std::invalid_argument("Kx0 must contain only finite values");
+        }
+    }
+
     if (!std::isfinite(problem.rho_alpha) || problem.rho_alpha < 0.0) {
         throw std::invalid_argument("rho_alpha must be a non-negative finite scalar");
     }

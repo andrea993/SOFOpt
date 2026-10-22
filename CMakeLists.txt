@@ -199,3 +199,19 @@ set(CPACK_PACKAGE_VENDOR "SOFOpt")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 include(CPack)
+
+# ------------------------------------------------------------------------------
+# Tests
+# ------------------------------------------------------------------------------
+
+include(CTest)
+
+if(BUILD_TESTING)
+    add_executable(SOFOpt_CustomInitialGainTest
+        tests/custom_initial_gain_test.cpp
+        $<TARGET_OBJECTS:SOFOpt_Objects>
+    )
+    target_include_directories(SOFOpt_CustomInitialGainTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(SOFOpt_CustomInitialGainTest PRIVATE SOFOpt_Objects)
+    add_test(NAME custom_initial_gain COMMAND SOFOpt_CustomInitialGainTest)
+endif()

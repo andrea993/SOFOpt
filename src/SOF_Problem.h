@@ -18,6 +18,8 @@ struct SOF_Problem
     Eigen::VectorXd X0;
     Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> ConstraintGain;
     Eigen::MatrixXd ConstraintGainValues;
+    // Optional initial full-state gain (Nu x Nx). An empty matrix selects LQR.
+    Eigen::MatrixXd Kx0;
     bool use_P_precond = true;
     double rho_alpha = 1e-6;
     double beta = 100.0; // Softmax spectral absicssa

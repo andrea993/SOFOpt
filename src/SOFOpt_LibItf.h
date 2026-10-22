@@ -35,6 +35,28 @@ DLL_EXPORT OptimOutput_C Optim_KxOut_C(
     double c //Softplus cost
   );
 
+/*
+ * Variant with a caller-provided initial full-state gain. Kx0 must use
+ * column-major storage and have dimensions B_cols x A_rows.
+ * It may be stable or unstable.
+ */
+DLL_EXPORT OptimOutput_C Optim_KxOut_WithKx0_C(
+    const double* A, int A_rows, int A_cols,
+    const double* B, int B_rows, int B_cols,
+    const double* C, int C_rows, int C_cols,
+    const double* Q, int Q_rows, int Q_cols,
+    const double* R, int R_rows, int R_cols,
+    const double* X0, int X0_size,
+    const double* Kx0, int Kx0_rows, int Kx0_cols,
+    const bool* ConstraintGain, int ConstraintGain_rows, int ConstraintGain_cols,
+    const double* ConstraintGainValues, int ConstraintGainValues_rows, int ConstraintGainValues_cols,
+    bool use_P_precond,
+    double rho_alpha,
+    double beta,
+    double r,
+    double c
+  );
+
 #ifdef __cplusplus
 }
 #endif

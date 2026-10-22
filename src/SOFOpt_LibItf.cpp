@@ -10,7 +10,9 @@
 
 //#define DEBUG
 
-OptimOutput_C Optim_KxOut_C(
+namespace
+{
+OptimOutput_C Optim_KxOut_Impl(
     const double* A, int A_rows, int A_cols,
     const double* B, int B_rows, int B_cols,
     const double* C, int C_rows, int C_cols,
@@ -20,7 +22,8 @@ OptimOutput_C Optim_KxOut_C(
     const bool* ConstraintGain, int ConstraintGain_rows, int ConstraintGain_cols,
     const double* ConstraintGainValues, int ConstraintGainValues_rows, int ConstraintGainValues_cols,
     bool use_P_precond,
-    double rho_alpha, double beta, double r, double c
+    double rho_alpha, double beta, double r, double c,
+    const double* Kx0, int Kx0_rows, int Kx0_cols
 )
 {
     OptimOutput_C result{};
@@ -39,6 +42,10 @@ OptimOutput_C Optim_KxOut_C(
         // Input validation
     if (!A || !B || !C || !Q || !R || !X0 || !ConstraintGain || !ConstraintGainValues) {
         throw std::invalid_argument("Null pointer passed as argument");
+    }
+
+    if ((Kx0 == nullptr) != (Kx0_rows == 0 && Kx0_cols == 0)) {
+        throw std::invalid_argument("Kx0 must be null with zero dimensions, or a valid Nu x Nx matrix");
     }
 
     if (A_rows <= 0 || A_cols <= 0 || B_rows <= 0 || B_cols <= 0 ||
@@ -60,6 +67,10 @@ OptimOutput_C Optim_KxOut_C(
         ConstraintGainValues_rows != B_cols ||
         ConstraintGainValues_cols != C_rows) {
         throw std::invalid_argument("Inconsistent matrix dimensions");
+    }
+
+    if (Kx0 != nullptr && (Kx0_rows != B_cols || Kx0_cols != A_rows)) {
+        throw std::invalid_argument("Kx0 must have dimensions B_cols x A_rows");
     }
 
     if (!std::isfinite(rho_alpha) || rho_alpha < 0.0) {
@@ -117,13 +128,16 @@ OptimOutput_C Optim_KxOut_C(
     problem.X0 = X0_map;
     problem.ConstraintGain = ConstraintGain_map;
     problem.ConstraintGainValues = ConstraintGainValues_map;
+    if (Kx0 != nullptr) {
+        problem.Kx0 = Eigen::Map<const Eigen::MatrixXd>(Kx0, Kx0_rows, Kx0_cols);
+    }
     problem.use_P_precond = use_P_precond;
     problem.rho_alpha = rho_alpha;
     problem.beta = beta;
     problem.r = r;
     problem.c = c;
 
-    auto sol = SOFOpt_SQP::Optim_KxOut(problem);
+    auto sol = SolveOutputFeedback(problem);
        
 
 #ifdef DEBUG
@@ -164,4 +178,46 @@ OptimOutput_C Optim_KxOut_C(
     }
 
     return result;
+}
+} // namespace
+
+OptimOutput_C Optim_KxOut_C(
+    const double* A, int A_rows, int A_cols,
+    const double* B, int B_rows, int B_cols,
+    const double* C, int C_rows, int C_cols,
+    const double* Q, int Q_rows, int Q_cols,
+    const double* R, int R_rows, int R_cols,
+    const double* X0, int X0_size,
+    const bool* ConstraintGain, int ConstraintGain_rows, int ConstraintGain_cols,
+    const double* ConstraintGainValues, int ConstraintGainValues_rows, int ConstraintGainValues_cols,
+    bool use_P_precond,
+    double rho_alpha, double beta, double r, double c)
+{
+    return Optim_KxOut_Impl(
+        A, A_rows, A_cols, B, B_rows, B_cols, C, C_rows, C_cols,
+        Q, Q_rows, Q_cols, R, R_rows, R_cols, X0, X0_size,
+        ConstraintGain, ConstraintGain_rows, ConstraintGain_cols,
+        ConstraintGainValues, ConstraintGainValues_rows, ConstraintGainValues_cols,
+        use_P_precond, rho_alpha, beta, r, c, nullptr, 0, 0);
+}
+
+OptimOutput_C Optim_KxOut_WithKx0_C(
+    const double* A, int A_rows, int A_cols,
+    const double* B, int B_rows, int B_cols,
+    const double* C, int C_rows, int C_cols,
+    const double* Q, int Q_rows, int Q_cols,
+    const double* R, int R_rows, int R_cols,
+    const double* X0, int X0_size,
+    const double* Kx0, int Kx0_rows, int Kx0_cols,
+    const bool* ConstraintGain, int ConstraintGain_rows, int ConstraintGain_cols,
+    const double* ConstraintGainValues, int ConstraintGainValues_rows, int ConstraintGainValues_cols,
+    bool use_P_precond,
+    double rho_alpha, double beta, double r, double c)
+{
+    return Optim_KxOut_Impl(
+        A, A_rows, A_cols, B, B_rows, B_cols, C, C_rows, C_cols,
+        Q, Q_rows, Q_cols, R, R_rows, R_cols, X0, X0_size,
+        ConstraintGain, ConstraintGain_rows, ConstraintGain_cols,
+        ConstraintGainValues, ConstraintGainValues_rows, ConstraintGainValues_cols,
+        use_P_precond, rho_alpha, beta, r, c, Kx0, Kx0_rows, Kx0_cols);
 }

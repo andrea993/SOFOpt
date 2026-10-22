@@ -101,9 +101,11 @@ namespace SOFOpt_ExecProtocol
 {
 SOF_Problem ReadProblem(std::istream& input)
 {
-    if (ReadScalar<std::uint32_t>(input) != kMagic) {
+    const auto magic = ReadScalar<std::uint32_t>(input);
+    if (magic != kMagic && magic != kMagicWithKx0) {
         throw std::runtime_error("Invalid solver request header");
     }
+    const bool has_kx0 = magic == kMagicWithKx0;
 
     const auto a_rows = ReadScalar<std::int32_t>(input);
     const auto a_cols = ReadScalar<std::int32_t>(input);
@@ -118,6 +120,8 @@ SOF_Problem ReadProblem(std::istream& input)
     const auto x0_size = ReadScalar<std::int32_t>(input);
     const auto constraint_gain_rows = ReadScalar<std::int32_t>(input);
     const auto constraint_gain_cols = ReadScalar<std::int32_t>(input);
+    const auto kx0_rows = has_kx0 ? ReadScalar<std::int32_t>(input) : 0;
+    const auto kx0_cols = has_kx0 ? ReadScalar<std::int32_t>(input) : 0;
     const auto use_p_precond = ReadScalar<std::uint8_t>(input);
     const auto rho_alpha = ReadScalar<double>(input);
     const auto beta = ReadScalar<double>(input);
@@ -133,6 +137,9 @@ SOF_Problem ReadProblem(std::istream& input)
     problem.X0 = ReadDoubleVector(input, x0_size);
     problem.ConstraintGain = ReadLogicalMatrix(input, constraint_gain_rows, constraint_gain_cols);
     problem.ConstraintGainValues = ReadDoubleMatrix(input, constraint_gain_rows, constraint_gain_cols);
+    if (has_kx0) {
+        problem.Kx0 = ReadDoubleMatrix(input, kx0_rows, kx0_cols);
+    }
     problem.use_P_precond = use_p_precond != 0;
     problem.rho_alpha = rho_alpha;
     problem.beta = beta;

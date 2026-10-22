@@ -23,7 +23,7 @@ public:
         Eigen::MatrixXd Q;
         Eigen::MatrixXd R;
         Eigen::VectorXd X0;
-        double LQR_cost;
+        double reference_cost;
         Eigen::MatrixXd OutputNullSpace;
         Eigen::MatrixXd OutputUsefulSpace;
         std::map<std::pair<int, int>, double> constraintGainMap;

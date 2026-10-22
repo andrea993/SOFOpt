@@ -9,6 +9,7 @@
 namespace SOFOpt_ExecProtocol
 {
 constexpr std::uint32_t kMagic = 0x3142464fU;
+constexpr std::uint32_t kMagicWithKx0 = 0x3242464fU;
 constexpr std::int32_t kSuccess = 0;
 constexpr std::int32_t kFailure = 1;
 

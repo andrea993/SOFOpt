@@ -12,10 +12,20 @@ u     = -Ky y
 ```
 
 the library computes an output-feedback gain `Ky` and the equivalent full-state
-gain `Kx = Ky * C`. The optimizer starts from the continuous-time LQR solution,
-projects it onto the feasible output-feedback space, enforces optional fixed
+gain `Kx = Ky * C`. The optimizer starts from either the continuous-time LQR
+solution or a caller-provided gain `Kx0`, projects it onto the feasible output-feedback space, enforces optional fixed
 entry constraints on `Ky`, and minimizes an LQR-style quadratic cost while preserving
 closed-loop stability through a soft spectral-abscissa constraint.
+
+The SQP fitness is the smooth regularized SOF cost centered by the constant
+full-state LQR cost. This constant shift leaves the mathematical minimizer and
+gradient unchanged, while improving the numerical scale seen by SLSQP. The
+LQR solution remains the reference for optional preconditioning, softplus
+regularization, and construction of the spectral-abscissa bound; `Kx0` changes
+only the optimization starting point. When `Kx0` is empty, the historical LQR
+behavior is preserved.
+The returned `init_cost` and `optim_cost` are physical, unregularized costs
+evaluated separately from the smooth optimization fitness.
 
 The primary public entry point is:
 
@@ -27,7 +37,7 @@ SOF_Result SolveOutputFeedback(const SOF_Problem& problem);
 
 - Static output-feedback synthesis for continuous-time LTI systems.
 - Optional fixed-value constraints for selected entries of `Ky`.
-- LQR-based initialization.
+- LQR-based or caller-provided `Kx0` initialization.
 - SQP optimization through NLopt's `NLOPT_LD_SLSQP` backend.
 - Eigen-based dense matrix API.
 - Optional Riccati-solution preconditioning for improved numerical conditioning.
@@ -182,6 +192,9 @@ int main()
                               true, false;
     problem.ConstraintGainValues = Eigen::MatrixXd::Zero(2, 2);
 
+    // Optional: leave empty for LQR, or provide any finite Nu x Nx gain.
+    // problem.Kx0 = my_initial_gain;
+
     problem.use_P_precond = true;
     problem.rho_alpha = 1e-6;
     problem.beta = 100.0;
@@ -216,6 +229,7 @@ struct SOF_Problem
     Eigen::VectorXd X0;
     Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> ConstraintGain;
     Eigen::MatrixXd ConstraintGainValues;
+    Eigen::MatrixXd Kx0;
     bool use_P_precond = true;
     double rho_alpha = 1e-6;
     double beta = 100.0;
@@ -244,8 +258,25 @@ Then the matrices must satisfy:
 | `X0` | `Nx` | Initial condition used in the cost evaluation. |
 | `ConstraintGain` | `Nu x Ny` | Boolean mask for fixed entries of `Ky`. |
 | `ConstraintGainValues` | `Nu x Ny` | Target values for fixed entries of `Ky`. |
+| `Kx0` | empty or `Nu x Nx` | Optional finite initial full-state gain. Empty selects LQR. |
 
-All fields are required. Empty matrices are rejected.
+All fields except `Kx0` are required. Empty required matrices are rejected.
+
+### Initial Gain
+
+By default, `Kx0` is empty and SOFOpt computes the continuous-time LQR gain,
+matching the previous behavior. To start from another controller, assign a
+finite `Nu x Nx` matrix; it does not need to stabilize the plant:
+
+```cpp
+problem.Kx0 = my_initial_gain;
+```
+
+The supplied gain becomes the NLopt starting point. The stable LQR controller
+continues to define the softplus parameters, relative spectral-abscissa bound,
+reported `init_cost`, and (when enabled) Riccati preconditioner. This separation
+allows an unstable `Kx0`: the smooth objective remains evaluable while the
+optimizer moves toward the LQR-derived stability constraint.
 
 ### Fixed Gain Constraints
 
@@ -302,8 +333,8 @@ struct SOF_Result
 | --- | --- |
 | `Kx` | Optimized full-state-equivalent gain, with size `Nu x Nx`. |
 | `Ky` | Optimized static output-feedback gain, with size `Nu x Ny`. |
-| `init_cost` | LQR reference cost in the optimization coordinates. |
-| `optim_cost` | Cost obtained by the optimized `Kx` in the original coordinates. |
+| `init_cost` | Physical, unregularized full-state LQR reference cost. |
+| `optim_cost` | Physical, unregularized cost obtained by the optimized `Kx` in the original coordinates. |
 | `result` | NLopt result string, or an error message in wrapper contexts. |
 
 The closed-loop matrix associated with the returned output-feedback controller is:
@@ -326,6 +357,7 @@ use it satisfies the output-feedback constraints imposed by `C`,
 - `ConstraintGain.cols() == C.rows()`,
 - `ConstraintGainValues.rows() == B.cols()`,
 - `ConstraintGainValues.cols() == C.rows()`,
+- `Kx0` empty or finite with dimensions `B.cols() x A.rows()`,
 - finite scalar tuning parameters,
 - non-negative `rho_alpha` and `r`,
 - positive `beta` and `c`.
@@ -382,6 +414,27 @@ OptimOutput_C Optim_KxOut_C(
     double c);
 ```
 
+This original entry point remains ABI-compatible and uses LQR initialization.
+To supply a custom initial gain, use the additional export:
+
+```c
+OptimOutput_C Optim_KxOut_WithKx0_C(
+    const double* A, int A_rows, int A_cols,
+    const double* B, int B_rows, int B_cols,
+    const double* C, int C_rows, int C_cols,
+    const double* Q, int Q_rows, int Q_cols,
+    const double* R, int R_rows, int R_cols,
+    const double* X0, int X0_size,
+    const double* Kx0, int Kx0_rows, int Kx0_cols,
+    const bool* ConstraintGain, int ConstraintGain_rows, int ConstraintGain_cols,
+    const double* ConstraintGainValues, int ConstraintGainValues_rows, int ConstraintGainValues_cols,
+    bool use_P_precond,
+    double rho_alpha,
+    double beta,
+    double r,
+    double c);
+```
+
 The return type is:
 
 ```c
@@ -427,7 +480,7 @@ All scalar values are written in the host's native endianness and ABI layout.
 Matrix payloads are column-major doubles.
 
 ```text
-uint32  magic = 0x3142464f
+uint32  magic = 0x3142464f       # v1, LQR initialization
 int32   A_rows
 int32   A_cols
 int32   B_rows
@@ -457,6 +510,12 @@ double  ConstraintGainValues[ConstraintGain_rows * ConstraintGain_cols]
 ```
 
 `ConstraintGain` entries are interpreted as false when zero and true otherwise.
+
+For custom initialization, request v2 uses magic `0x3242464f`, adds
+`int32 Kx0_rows` and `int32 Kx0_cols` immediately after
+`ConstraintGain_cols`, and appends the column-major `double Kx0[Kx0_rows *
+Kx0_cols]` payload after `ConstraintGainValues`. The dimensions must be
+`B_cols x A_rows`. The response format and its v1 response magic are unchanged.
 
 ### Response Layout
 
@@ -512,7 +571,7 @@ SOFOpt-<version>-<system>-<processor>.zip
 SOFOpt assumes a continuous-time plant and dense matrices. The optimization path
 uses:
 
-- continuous-time algebraic Riccati equation utilities for LQR initialization,
+- continuous-time algebraic Riccati equation utilities for default LQR initialization,
 - Lyapunov equation solves for cost evaluation,
 - Schur/eigenvalue-based spectral-abscissa utilities,
 - a smooth softplus-modified cost around the stability boundary,
